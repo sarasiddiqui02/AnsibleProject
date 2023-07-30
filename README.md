@@ -6,4 +6,4 @@ Please note that the above playbook assumes you have set up the AWS credentials 
 
 After creating the playbook, you can execute it using the ansible-playbook command:
 
-ansible-playbook app-network.yml
+ansible-playbook app-infrastructure.yml
