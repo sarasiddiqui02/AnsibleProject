@@ -5,7 +5,7 @@
   tasks:
     - name: Create VPC
       ec2_vpc_net:
-        name: MyVPC
+        name: Project7VPC
         cidr_block: 10.0.0.0/16
         region: us-east-1
         state: present
@@ -42,15 +42,12 @@
         state: present
         subnets:
           - "{{ public_subnet.subnet.id }}"
+        tags:
+          Name: PublicRouteTable
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
       register: public_route_table
-
-    - name: Create API Security Group
-      ec2_group:
-        name: API_SG
-        description: Security group for API servers
-        vpc_id: "{{ vpc_net.vpc.id }}"
-        region: us-east-1
-        state: present
 
     - name: Create Security Group for Database Server
       ec2_group:
@@ -61,7 +58,28 @@
         state: present
         rules:
           - proto: tcp
-            from_port: 3306
-            to_port: 3306
-            group_name: API_SG
+            from_port: 5432
+            to_port: 5432
+            cidr_ip: 10.0.0.0/24  
+      register: db_sec_group
+
+
+    - name: Create API Security Group
+      ec2_group:
+        name: API_SG
+        description: Security group for API servers
+        vpc_id: "{{ vpc_net.vpc.id }}"
+        region: us-east-1
+        state: present
+        rules:
+          - proto: tcp
+            from_port: 80 # Assuming your API listens on port 80 for HTTP traffic
+            to_port: 80
+            cidr_ip: 0.0.0.0/0 # Allow traffic from any public IP (Internet)
+          - proto: tcp
+            from_port: 5432 # Assuming your database listens on port 5432(Postgres)
+            to_port: 5432
+            group_id: "{{db_sec_group.group_id}}"
+
+    
 
