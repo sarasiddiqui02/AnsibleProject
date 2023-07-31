@@ -1,0 +1,109 @@
+- name: Provision and Configure Database Server
+  hosts: localhost
+  gather_facts: no
+  become: true
+
+  vars:
+    region: us-east-1
+    postgres_password: "your_custom_postgres_password"  # Set your custom password here
+
+  tasks:
+    - name: Include App Network Variables
+      include_vars:
+        file: app-network.yml
+
+    - name: Generate SSH Key Pair
+      ec2_key:
+        name: my_key_pair
+        region: "{{ region }}"
+      register: key_pair_info
+      
+    - name: Save Private Key Locally
+      copy:
+        content: "{{ key_pair_info.key.private_key }}"
+        dest: "{{ playbook_dir }}/my_key_pair.pem"
+        mode: '0600'
+
+    - name: Create and Launch EC2 Instance
+      ec2_instance:
+        region: "{{ region }}"
+        key_name: "my_key_pair"
+        instance_type: t2.micro
+        image_id: "ami-053b0d53c279acc90"  # Replace with the appropriate Ubuntu 22.04 AMI ID
+        subnet_id: "{{ private_subnet_id }}"
+        assign_public_ip: false
+        state: present
+      register: ec2_instance
+
+    - name: Wait for SSH to be available
+      wait_for:
+        host: "{{ ec2_instance.instance.public_ip }}"
+        port: 22
+        delay: 5
+        timeout: 300
+
+    - name: Install PostgreSQL Database Server
+      apt:
+        update_cache: yes
+
+    - name: Install PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+
+    - name: Create PostgreSQL Database and Table
+      vars:
+        db_name: nhl_players
+        table_name: players
+      tasks:
+        - name: Create Database
+          postgresql_db:
+            name: "{{ db_name }}"
+            state: present
+          become_user: postgres
+
+        - name: Create Table
+          postgresql_query:
+            db: "{{ db_name }}"
+            login_user: postgres
+            login_password: "{{ postgres_password }}"
+            query: |
+              CREATE TABLE IF NOT EXISTS {{ table_name }} (
+                Id SERIAL PRIMARY KEY,
+                name VARCHAR(80),
+                team VARCHAR(80)
+              );
+          become_user: postgres
+
+    - name: Insert Data into Table
+      become: true
+      vars:
+        db_name: nhl_players
+        table_name: players
+      tasks:
+        - name: Insert Data
+          postgresql_query:
+            db: "{{ db_name }}"
+            login_user: postgres
+            login_password: "{{ postgres_password }}"
+            query: |
+              INSERT INTO {{ table_name }} ("name", "team")
+              VALUES ('EDM', 'Los Angeles');
+          become_user: postgres
+
+    - name: Start and Enable PostgreSQL Service
+      become: true
+      tasks:
+        - name: Start PostgreSQL service
+          service:
+            name: postgresql
+            state: started
+            enabled: yes
+
+    - name: Open Port 5432 for PostgreSQL
+      tasks:
+        - name: Allow incoming traffic on port 5432
+          ufw:
+            rule: allow
+            port: 5432
+          become: true

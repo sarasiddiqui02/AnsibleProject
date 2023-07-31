@@ -35,6 +35,10 @@
         state: present
       register: private_subnet
 
+    - name: Save Private Subnet ID as Fact
+      set_fact:
+        private_subnet_id: "{{ private_subnet.subnet.id }}"  
+
     - name: Create Public Route Table
       ec2_vpc_route_table:
         vpc_id: "{{ vpc_net.vpc.id }}"
