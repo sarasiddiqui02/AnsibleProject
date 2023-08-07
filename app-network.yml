@@ -2,6 +2,15 @@
 - name: Provision AWS VPC network
   hosts: localhost
   gather_facts: no
+
+  vars:
+    region: us-east-1
+    postgres_password: "password123"  # Set your custom password here
+    db_user: testuser
+    db_name: nhl_players
+    db_password: password123
+    my_key_pair: project7_key
+
   tasks:
     - name: Create VPC
       ec2_vpc_net:
@@ -25,6 +34,8 @@
         region: us-east-1
         state: present
         map_public: yes
+        tags:
+          Name: public_subnet
       register: public_subnet
 
     - name: Create Private Subnet
@@ -33,6 +44,8 @@
         cidr: 10.0.1.0/24
         region: us-east-1
         state: present
+        tags:
+          Name: private_subnet
       register: private_subnet
 
     - name: Save Private Subnet ID as Fact
@@ -64,9 +77,12 @@
           - proto: tcp
             from_port: 5432
             to_port: 5432
-            cidr_ip: 10.0.0.0/24  
+            cidr_ip: 10.0.0.0/24 
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0  # Allow SSH from anywhere (not recommended for production)
       register: db_sec_group
-
 
     - name: Create API Security Group
       ec2_group:
@@ -84,6 +100,127 @@
             from_port: 5432 # Assuming your database listens on port 5432(Postgres)
             to_port: 5432
             group_id: "{{db_sec_group.group_id}}"
+
+- name: Configure Database Server and Application
+  hosts: localhost
+  gather_facts: no
+  become: true
+
+  vars:
+    region: us-east-1
+    postgres_password: "password123"  # Set your custom password here
+    db_user: testuser
+    db_name: nhl_players
+    db_password: password123
+    my_key_pair: project7_key
+    db_ec2_name: db_ec2
+ 
+  tasks:
+
+    - name: create a new EC2 key pair, returns generated private key
+      ec2_key:
+        name: "{{ my_key_pair}}"
+        region: "{{ region }}" 
+      register: key_pair_info
+      
+    - name: Save Private Key Locally
+      copy:
+        content: "{{ key_pair_info.key.private_key }}"
+        dest: "{{ playbook_dir }}/{{ my_key_pair }}.pem"
+        mode: '0600'
+
+    # - name: Allow incoming traffic on port 22 (SSH) using pfctl
+    #   shell: "sudo pfctl -s rules | grep 'pass in proto tcp from any to any port 22' || sudo pfctl -a 'com.apple/250.Allow SSH' -f /etc/pf.anchors/ssh_rules -e"
+    #   args:
+    #     executable: /bin/bash
+    #   become: true
+
+
+    - name: Create and Launch EC2 Instance
+      ec2_instance:
+        # ec2_region: "{{ region }}"
+        name: "{{ db_ec2_name }}"
+        key_name: "{{ my_key_pair}}"
+        instance_type: t2.micro
+        image_id: "ami-053b0d53c279acc90"  # Replace with the appropriate Ubuntu 22.04 AMI ID
+        subnet_id: "{{ private_subnet_id }}"
+        security_group: "{{ db_sec_group.group_id }}"
+        # assign_public_ip: false
+        state: present
+      register: ec2_instance
+
+    
+
+    # - name: Debug ec2_instance variable
+    #   debug:
+    #     var: ec2_instance
+
+    - name: Wait for SSH to be available
+      wait_for:
+        host: "{{ ec2_instance.instances[0].private_ip_address }}"
+        port: 22
+        delay: 5
+        timeout: 300
+
+    - name: Install dependencies for PostgreSQL
+      apt: name={{ item }} update_cache=true state=latest
+      with_items:
+      - bash
+      - openssl
+      - libssl-dev
+      - libssl-doc
+    
+    - name: Install PostgreSQL 
+      apt: name=postgresql update_cache=true state=present
+      with_items:
+      - postgresql
+      - postgresql-contrib
+      - libpq-dev
+      - python3-psycopg2
+ 
+    - name: Ensure the PostgreSQL service is running
+      service: 
+        name: postgresql 
+        state: started 
+        enabled: yes
+
+    - name: Create the database specified in vars
+      become: true
+      become_user: postgres
+      postgresql_db: 
+        name: "{{ db_name }}"
+        template: 'template0'
+        state: present
+
+    - name: Ensure user has access to the new database
+      become: true
+      become_user: postgres
+      postgresql_user: 
+        db: "{{ db_name }}"
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        priv: ALL
+        state: present
+
+    - name: Ensure user does not have unnecessary permissions
+      become: true
+      become_user: postgres
+      postgresql_user: 
+        name: "{{ db_user }}"
+        role_attr_flags: NOSUPERUSER,NOCREATEDB
+        state: present
+
+    - name: Add some dummy data to our database
+      become: true
+      become_user: postgres
+      shell: psql {{ db_name }} < /tmp/dump.sql
+
+
+    - name: Allow incoming traffic on port 5432
+      ufw:
+        rule: allow
+        port: 5432
+      become: true
 
     
 
