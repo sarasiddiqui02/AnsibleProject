@@ -1,5 +1,6 @@
 ---
-- name: Provision AWS VPC network
+
+- name: Provision AWS VPC network # Start AWS VPC network setup #
   hosts: localhost
   gather_facts: no
 
@@ -25,32 +26,55 @@
         vpc_id: "{{ vpc_net.vpc.id }}"
         region: us-east-1
         state: present
+        tags:
+          Name: P7 IGW
       register: igw
 
-    - name: Create Public Subnet
-      ec2_vpc_subnet:
-        vpc_id: "{{ vpc_net.vpc.id }}"
-        cidr: 10.0.0.0/24
-        region: us-east-1
-        state: present
-        map_public: yes
-        tags:
-          Name: public_subnet
-      register: public_subnet
-
-    - name: Create Private Subnet
+    - name: Create Public Subnet 1
       ec2_vpc_subnet:
         vpc_id: "{{ vpc_net.vpc.id }}"
         cidr: 10.0.1.0/24
         region: us-east-1
         state: present
+        map_public: yes
         tags:
-          Name: private_subnet
-      register: private_subnet
+          Name: P7 Public Subnet 1
+      register: public_subnet1
 
-    - name: Save Private Subnet ID as Fact
-      set_fact:
-        private_subnet_id: "{{ private_subnet.subnet.id }}"  
+    - name: Create Public Subnet 2
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_net.vpc.id }}"
+        cidr: 10.0.2.0/24
+        region: us-east-1
+        state: present
+        map_public: yes
+        tags:
+          Name: P7 Public Subnet 2
+      register: public_subnet2
+
+    - name: Create Private Subnet 1
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_net.vpc.id }}"
+        cidr: 10.0.10.0/24
+        region: us-east-1
+        state: present
+        tags:
+          Name: P7 Private Subnet 1
+      register: private_subnet1
+
+    - name: Create Private Subnet 2
+      ec2_vpc_subnet:
+        vpc_id: "{{ vpc_net.vpc.id }}"
+        cidr: 10.0.11.0/24
+        region: us-east-1
+        state: present
+        tags:
+          Name: P7 Private Subnet 2
+      register: private_subnet2
+
+    # - name: Save Private Subnet ID as Fact
+    #   set_fact:
+    #     private_subnet_id: "{{ private_subnet.subnet.id }}"  
 
     - name: Create Public Route Table
       ec2_vpc_route_table:
@@ -58,9 +82,12 @@
         region: us-east-1
         state: present
         subnets:
-          - "{{ public_subnet.subnet.id }}"
+          - "{{ public_subnet1.subnet.id }}"
+          - "{{ public_subnet2.subnet.id }}"
+          - "{{ private_subnet1.subnet.id }}"
+          - "{{ private_subnet2.subnet.id }}"
         tags:
-          Name: PublicRouteTable
+          Name: P7 PublicRouteTable
         routes:
           - dest: 0.0.0.0/0
             gateway_id: "{{ igw.gateway_id }}"
@@ -78,10 +105,6 @@
             from_port: 5432
             to_port: 5432
             cidr_ip: 10.0.0.0/24 
-          - proto: tcp
-            from_port: 22
-            to_port: 22
-            cidr_ip: 0.0.0.0/0  # Allow SSH from anywhere (not recommended for production)
       register: db_sec_group
 
     - name: Create API Security Group
@@ -100,8 +123,17 @@
             from_port: 5432 # Assuming your database listens on port 5432(Postgres)
             to_port: 5432
             group_id: "{{db_sec_group.group_id}}"
+          - proto: tcp
+            from_port: 22 # Assuming your API listens on port 80 for HTTP traffic
+            to_port: 22
+            cidr_ip: 0.0.0.0/0 # Allow traffic from any public IP (Internet)
+      register: api_sec_group
+# End AWS VPC network setup #
 
-- name: Configure Database Server and Application
+
+# Start API server setup
+
+- name: Configure API Server 
   hosts: localhost
   gather_facts: no
   become: true
@@ -109,11 +141,8 @@
   vars:
     region: us-east-1
     postgres_password: "password123"  # Set your custom password here
-    db_user: testuser
-    db_name: nhl_players
-    db_password: password123
     my_key_pair: project7_key
-    db_ec2_name: db_ec2
+    api_ec2_name: api_ec2
  
   tasks:
 
@@ -129,25 +158,56 @@
         dest: "{{ playbook_dir }}/{{ my_key_pair }}.pem"
         mode: '0600'
 
-    # - name: Allow incoming traffic on port 22 (SSH) using pfctl
-    #   shell: "sudo pfctl -s rules | grep 'pass in proto tcp from any to any port 22' || sudo pfctl -a 'com.apple/250.Allow SSH' -f /etc/pf.anchors/ssh_rules -e"
-    #   args:
-    #     executable: /bin/bash
-    #   become: true
+    - name: Create and Launch API EC2 Instance in public subnet 1
+      ec2_instance:
+        # ec2_region: "{{ region }}"
+        name: "{{ api_ec2_name }}"
+        key_name: "{{ my_key_pair}}"
+        instance_type: t2.micro
+        image_id: "ami-053b0d53c279acc90"  # Replace with the appropriate Ubuntu 22.04 AMI ID
+        subnet_id: "{{ public_subnet1.subnet.id }}"
+        security_group: "{{ api_sec_group.group_id }}"
+        # assign_public_ip: false
+        state: present
+        tags:
+          Name: "APIEC2Instance"
+        user_data: "{{ lookup('file', 'user_data_script.sh') }}"  # Specify the path to your user data script
+      
+      register: api_ec2_instance
 
+# End API server setup
+ 
 
-    - name: Create and Launch EC2 Instance
+# Start Database server setup
+
+- name: Configure Database Server and Application
+  hosts: localhost
+  gather_facts: no
+  become: true
+
+  vars:
+    region: us-east-1
+    postgres_password: "password123"  # Set your custom password here
+    my_key_pair: project7_key
+    db_user: testuser
+    db_name: nhl_players
+    db_password: password123
+    db_ec2_name: db_ec2
+ 
+  tasks:
+
+    - name: Create and Launch DB EC2 Instance in Private Subnet 1
       ec2_instance:
         # ec2_region: "{{ region }}"
         name: "{{ db_ec2_name }}"
         key_name: "{{ my_key_pair}}"
         instance_type: t2.micro
         image_id: "ami-053b0d53c279acc90"  # Replace with the appropriate Ubuntu 22.04 AMI ID
-        subnet_id: "{{ private_subnet_id }}"
+        subnet_id: "{{ private_subnet1.subnet.id }}"
         security_group: "{{ db_sec_group.group_id }}"
         # assign_public_ip: false
         state: present
-      register: ec2_instance
+      register: db_ec2_instance
 
     
 
@@ -155,72 +215,75 @@
     #   debug:
     #     var: ec2_instance
 
-    - name: Wait for SSH to be available
-      wait_for:
-        host: "{{ ec2_instance.instances[0].private_ip_address }}"
-        port: 22
-        delay: 5
-        timeout: 300
+    # - name: Wait for SSH to be available
+    #   wait_for:
+    #     host: "{{ ec2_instance.instances[0].private_ip_address }}"
+    #     port: 22
+    #     delay: 5
+    #     timeout: 300
 
-    - name: Install dependencies for PostgreSQL
-      apt: name={{ item }} update_cache=true state=latest
-      with_items:
-      - bash
-      - openssl
-      - libssl-dev
-      - libssl-doc
+    # - name: Install dependencies for PostgreSQL
+    #   apt: name={{ item }} update_cache=true state=latest
+    #   with_items:
+    #   - bash
+    #   - openssl
+    #   - libssl-dev
+    #   - libssl-doc
     
-    - name: Install PostgreSQL 
-      apt: name=postgresql update_cache=true state=present
-      with_items:
-      - postgresql
-      - postgresql-contrib
-      - libpq-dev
-      - python3-psycopg2
+    # - name: Install PostgreSQL 
+    #   apt: name=postgresql update_cache=true state=present
+    #   with_items:
+    #   - postgresql
+    #   - postgresql-contrib
+    #   - libpq-dev
+    #   - python3-psycopg2
  
-    - name: Ensure the PostgreSQL service is running
-      service: 
-        name: postgresql 
-        state: started 
-        enabled: yes
+    # - name: Ensure the PostgreSQL service is running
+    #   service: 
+    #     name: postgresql 
+    #     state: started 
+    #     enabled: yes
 
-    - name: Create the database specified in vars
-      become: true
-      become_user: postgres
-      postgresql_db: 
-        name: "{{ db_name }}"
-        template: 'template0'
-        state: present
+    # - name: Create the database specified in vars
+    #   become: true
+    #   become_user: postgres
+    #   postgresql_db: 
+    #     name: "{{ db_name }}"
+    #     template: 'template0'
+    #     state: present
 
-    - name: Ensure user has access to the new database
-      become: true
-      become_user: postgres
-      postgresql_user: 
-        db: "{{ db_name }}"
-        name: "{{ db_user }}"
-        password: "{{ db_password }}"
-        priv: ALL
-        state: present
+    # - name: Ensure user has access to the new database
+    #   become: true
+    #   become_user: postgres
+    #   postgresql_user: 
+    #     db: "{{ db_name }}"
+    #     name: "{{ db_user }}"
+    #     password: "{{ db_password }}"
+    #     priv: ALL
+    #     state: present
 
-    - name: Ensure user does not have unnecessary permissions
-      become: true
-      become_user: postgres
-      postgresql_user: 
-        name: "{{ db_user }}"
-        role_attr_flags: NOSUPERUSER,NOCREATEDB
-        state: present
+    # - name: Ensure user does not have unnecessary permissions
+    #   become: true
+    #   become_user: postgres
+    #   postgresql_user: 
+    #     name: "{{ db_user }}"
+    #     role_attr_flags: NOSUPERUSER,NOCREATEDB
+    #     state: present
 
-    - name: Add some dummy data to our database
-      become: true
-      become_user: postgres
-      shell: psql {{ db_name }} < /tmp/dump.sql
+    # - name: Add some dummy data to our database
+    #   become: true
+    #   become_user: postgres
+    #   shell: psql {{ db_name }} < /tmp/dump.sql
 
 
-    - name: Allow incoming traffic on port 5432
-      ufw:
-        rule: allow
-        port: 5432
-      become: true
+    # - name: Allow incoming traffic on port 5432
+    #   ufw:
+    #     rule: allow
+    #     port: 5432
+    #   become: true
+
+  # End Database server setup
+
 
     
 
