@@ -171,8 +171,7 @@
         state: present
         tags:
           Name: "APIEC2Instance"
-        user_data: "{{ lookup('file', 'cloud_config.yml') }}"  # Specify the path to your user data script
-      
+        user_data: "{{ lookup('file', 'cloud_config.yml') }}"  # Specify the path to your user data script 
       register: api_ec2_instance
 
 # End API server setup
@@ -207,6 +206,9 @@
         security_group: "{{ db_sec_group.group_id }}"
         # assign_public_ip: false
         state: present
+        tags:
+          Name: "DBEC2Instance"
+        user_data: "{{ lookup('file', 'db_cloud_config.yml') }}"  # Specify the path to your user data script
       register: db_ec2_instance
 
     

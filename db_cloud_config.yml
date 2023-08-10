@@ -1,0 +1,28 @@
+#cloud-config
+write_files:
+  - path: /tmp/file
+    content: |
+      start
+      awscli
+      Install postgressql client
+      end of postgres install
+      Initialize postgres variables
+
+runcmd:
+  - sudo apt update && sudo apt upgrade -y
+  - echo "awscli" >> /tmp/file
+  - sudo apt install awscli -y
+  - echo "Install postgressql client" >> /tmp/file
+  - echo "Y" | sudo apt-get install postgresql postgresql-contrib
+  - sleep 2
+  - sudo -i -u postgres which psql
+  - echo "end of postgres install" >> /tmp/file
+  - echo "Initialize postgres variables" >> /tmp/file
+  - cd ~
+  - echo "POSTGRES_HOST=\"rds-postgres.cppgpj9bgk45.us-east-1.rds.amazonaws.com\"" > /var/lib/postgresql/vars.txt
+  - echo "POSTGRES_PORT=5432" >> /var/lib/postgresql/vars.txt
+  - echo "POSTGRES_DB=project2" >> /var/lib/postgresql/vars.txt
+  - echo "POSTGRES_PASSWORD=\"postgres\"" >> /var/lib/postgresql/vars.txt
+  - echo "PGPASSWORD=postgres" >> /var/lib/postgresql/vars.txt
+  - chown postgres:postgres /var/lib/postgresql/vars.txt
+  - cat /var/lib/postgresql/vars.txt >> /tmp/file
