@@ -171,7 +171,7 @@
         state: present
         tags:
           Name: "APIEC2Instance"
-        user_data: "{{ lookup('file', 'user_data_script.sh') }}"  # Specify the path to your user data script
+        user_data: "{{ lookup('file', 'cloud_config.yml') }}"  # Specify the path to your user data script
       
       register: api_ec2_instance
 
