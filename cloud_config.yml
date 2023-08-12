@@ -1,53 +1,58 @@
 #cloud-config
 
-# Add delay for 1 second
-runcmd:
-  - sleep 1
-
 # Create directory and navigate to it
+runcmd:
   - mkdir /home/ubuntu/apiServer
   - cd /home/ubuntu/apiServer
 
-# Print current directory to a file
+# Write index.js file
+write_files:
+  - path: /home/ubuntu/apiServer/index.js
+    permissions: '0644'
+    owner: ubuntu
+    content: |
+      #!/bin/bash
+      # Contents of your index.js file here
+      
+  # Add delay for 1 second
+  - sleep 1
+
+  # Print current directory to a file
   - pwd >> /tmp/file
 
-# Configure AWS credentials
+  # Configure AWS credentials
   - sudo -i -u ubuntu aws configure set aws_access_key_id *****
   - sudo -i -u ubuntu aws configure set aws_secret_access_key *****
   - sudo -i -u ubuntu aws configure set default.region us-east-1
   - sudo -i -u ubuntu aws configure set output None
 
-# Append AWS credentials info to the file
+  # Append AWS credentials info to the file
   - echo "end of aws credentials" >> /tmp/file
 
-# Print message indicating the creation of the apiServer directory
+  # Print message indicating the creation of the apiServer directory
   - echo "creating dir apiServer" >> /tmp/file
 
-# Update package information and install node.js
+  # Update package information and install node.js
   - sudo apt update
   - sudo apt install nodejs -y
 
-# Install npm packages: express and pg
+  # Install npm packages: express and pg
   - echo "Install npm express pg" >> /tmp/file
   - sudo apt install npm -y
   - sudo npm install express pg
 
-# Install pm2 globally
+  # Install pm2 globally
   - sudo npm install pm2@latest -g
 
-# Change ownership of the apiServer directory to the ubuntu user
+  # Change ownership of the apiServer directory to the ubuntu user
   - sudo chown -R ubuntu:ubuntu /home/ubuntu/apiServer
   - ls -ld /home/ubuntu/apiServer >> /tmp/file
 
-# Copy a file from an S3 bucket to the apiServer directory
-  - sudo -i -u ubuntu aws s3 cp s3://wecloud-projects/project2/index.js /home/ubuntu/apiServer
-  - ls -la /home/ubuntu/apiServer >> /tmp/file
-
-# Start the Node.js application using pm2
+  # Start the Node.js application using pm2
   - cd /home/ubuntu/apiServer
   - pm2 start /home/ubuntu/apiServer/index.js
   - pm2 startup
   - sudo env PATH=$PATH:/usr/bin /usr/local/lib/node_modules/pm2/bin/pm2 startup systemd -u ubuntu --hp /home/ubuntu
 
-# Print end of user data
+  # Print end of user data
   - echo "end of user data ***" >> /tmp/file
